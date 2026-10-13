@@ -1,0 +1,13 @@
+node_modules
+.next
+out
+dist
+dist-electron
+release
+vendor/ffmpeg
+vendor/.cache
+.vercel
+.env
+.env.local
+*.log
+tsconfig.tsbuildinfo
