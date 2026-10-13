@@ -1,0 +1,78 @@
+{
+  "name": "tapo-ses",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tapo C210 hoparlöründen özel MP3 çalan Windows ve macOS uygulaması.",
+  "author": "Tapo Ses",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k -n vite,app \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build:renderer": "vite build",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --outdir=dist-electron --external:electron",
+    "build": "node scripts/icon.mjs && npm run build:renderer && npm run build:electron",
+    "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "dist": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win zip --x64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip --x64 --arm64",
+    "dist:win": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis zip --x64",
+    "dist:mac": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip dmg --x64 --arm64",
+    "start": "npm run build && electron .",
+    "bridge": "tsx bridge/server.ts",
+    "test": "tsx --test lib/tapo/*.test.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tsx": "^4.20.5"
+  },
+  "devDependencies": {
+    "@fontsource/fraunces": "^5.2.5",
+    "@fontsource/outfit": "^5.2.5",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.ruzgar.taposes",
+    "productName": "Tapo Ses",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/ffmpeg",
+        "to": "ffmpeg"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["zip", "dmg"],
+      "identity": null
+    },
+    "win": {
+      "target": ["nsis", "zip"],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Tapo Ses"
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
+  }
+}
