@@ -64,7 +64,7 @@ export async function performPlay(
   } catch (error) {
     if (error instanceof PlayBusyError) return { status: 409, body: { error: error.message } };
     const message = error instanceof Error ? error.message : "Ses çalınamadı";
-    const status = /çalınamadı|zaman aşımı|kabul edilmedi|reddetti/.test(message) ? 502 : 400;
+    const status = /ulaşılamadı|zaman aşımı|kabul edilmedi|reddetti/.test(message) ? 502 : 400;
     return { status, body: { error: message } };
   }
 }
