@@ -2,7 +2,7 @@
   "name": "tapo-ses",
   "version": "0.1.0",
   "private": true,
-  "description": "Tapo C210 hoparlöründen özel MP3 çalan Windows ve macOS uygulaması.",
+  "description": "Play your own audio through a Tapo camera speaker on Windows, macOS, Linux, and Android.",
   "author": "Tapo Ses",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --outdir=dist-electron --external:electron",
     "build": "node scripts/icon.mjs && npm run build:renderer && npm run build:electron",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
-    "dist": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --win zip --x64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --mac zip --x64 --arm64",
+    "dist": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --win zip --x64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --mac zip --x64 --arm64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --linux AppImage deb --x64 --arm64",
+    "dist:linux": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --linux AppImage deb --x64 --arm64",
     "dist:win": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --win nsis zip --x64",
     "dist:mac": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --mac zip dmg --x64 --arm64",
     "start": "npm run build && electron .",
@@ -72,7 +73,10 @@
       "shortcutName": "Tapo Ses"
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": ["AppImage", "deb"],
+      "category": "Audio",
+      "maintainer": "Tapo Ses",
+      "artifactName": "Tapo.Ses-${version}-${arch}.${ext}"
     }
   }
 }

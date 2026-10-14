@@ -21,7 +21,7 @@ export function ffmpegAvailable(): boolean {
 export async function transcodeToAlaw(input: Buffer): Promise<{ audio: Buffer; truncated: boolean }> {
   const binary = ffmpegBinary();
   if (!ffmpegAvailable()) {
-    throw new Error("Ses motoru bulunamadı. Uygulamayı yeniden kur.");
+    throw new Error("Audio engine missing. Reinstall the app.");
   }
 
   const audio = await new Promise<Buffer>((resolve, reject) => {

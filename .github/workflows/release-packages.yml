@@ -32,3 +32,30 @@ jobs:
         run: |
           gh release upload v0.1.0 "release/Tapo Ses-0.1.0-mac.zip" "release/Tapo Ses-0.1.0-arm64-mac.zip" --repo "${{ github.repository }}" --clobber
           gh release edit v0.1.0 --repo "${{ github.repository }}" --notes-file .github/v0.1.0.md
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Linux packages
+        env:
+          NODE_ENV: development
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          set -euo pipefail
+          npm install --include=dev
+          npm run dist:linux
+      - name: Attach Linux packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(release/*.AppImage release/*.deb)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No Linux packages were produced" >&2
+            exit 1
+          fi
+          gh release upload v0.1.0 "${files[@]}" --repo "${{ github.repository }}" --clobber

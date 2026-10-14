@@ -23,15 +23,15 @@ type Endpoint = { hostname: string; port: number };
 export function parseCameraHost(host: string): Endpoint {
   const trimmed = host.trim();
   if (!trimmed || /[\s/]/.test(trimmed)) {
-    throw new Error("Kamera adresi geçersiz");
+    throw new Error("Camera address is invalid.");
   }
   if (trimmed === "169.254.169.254" || trimmed.startsWith("169.254.169.254:")) {
-    throw new Error("Bu adres kullanılamaz");
+    throw new Error("This address cannot be used.");
   }
   const colon = trimmed.lastIndexOf(":");
   if (colon > 0 && /^\d{1,5}$/.test(trimmed.slice(colon + 1))) {
     const port = Number(trimmed.slice(colon + 1));
-    if (port < 1 || port > 65535) throw new Error("Kamera portu geçersiz");
+    if (port < 1 || port > 65535) throw new Error("Camera port is invalid.");
     return { hostname: trimmed.slice(0, colon), port };
   }
   return { hostname: trimmed, port: 8800 };
@@ -63,7 +63,7 @@ class BytePump {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.notify = null;
-        reject(new Error("Kamera zaman aşımına uğradı"));
+        reject(new Error("The camera timed out."));
       }, timeoutMs);
       this.notify = () => {
         clearTimeout(timer);
@@ -76,7 +76,7 @@ class BytePump {
   async read(count: number, timeoutMs: number): Promise<Buffer> {
     while (this.buf.length < count) {
       if (this.failure) throw this.failure;
-      if (this.ended) throw new Error("Kamera bağlantıyı kapattı");
+      if (this.ended) throw new Error("The camera closed the connection.");
       await this.wait(timeoutMs);
     }
     const out = this.buf.subarray(0, count);
@@ -102,7 +102,7 @@ class BytePump {
         return { status, headers, raw };
       }
       if (this.failure) throw this.failure;
-      if (this.ended) throw new Error("Kamera bağlantıyı kapattı");
+      if (this.ended) throw new Error("The camera closed the connection.");
       await this.wait(timeoutMs);
     }
   }
@@ -121,7 +121,7 @@ class BytePump {
       if (this.ended) break;
       await this.wait(Math.max(200, deadline - Date.now()));
     }
-    throw new Error("Kameradan konuşma oturumu gelmedi");
+    throw new Error("The camera did not start a talk session.");
   }
 }
 
@@ -139,7 +139,7 @@ function extractSession(text: string): string | null {
         params?: { session_id?: string; sessionId?: string };
       };
       if (parsed.error_code && parsed.error_code !== 0) {
-        throw new Error(`Kamera konuşma isteğini reddetti (${parsed.error_code})`);
+        throw new Error(`The camera rejected the talk request (${parsed.error_code}).`);
       }
       return parsed.params?.session_id ?? parsed.params?.sessionId ?? null;
     } catch (error) {
@@ -153,7 +153,7 @@ function extractSession(text: string): string | null {
 function openSocket(endpoint: Endpoint, signal?: AbortSignal): Promise<Socket> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new Error("Çalma durduruldu"));
+      reject(new Error("Stopped."));
       return;
     }
     const socket = connect({ host: endpoint.hostname, port: endpoint.port, family: 4 });
@@ -161,7 +161,7 @@ function openSocket(endpoint: Endpoint, signal?: AbortSignal): Promise<Socket> {
       socket.destroy();
       reject(error);
     };
-    const onAbort = () => fail(new Error("Çalma durduruldu"));
+    const onAbort = () => fail(new Error("Stopped."));
     signal?.addEventListener("abort", onAbort, { once: true });
     socket.once("connect", () => {
       signal?.removeEventListener("abort", onAbort);
@@ -171,12 +171,12 @@ function openSocket(endpoint: Endpoint, signal?: AbortSignal): Promise<Socket> {
       signal?.removeEventListener("abort", onAbort);
       reject(
         new Error(
-          `Kameraya ulaşılamadı (${endpoint.hostname}:${endpoint.port}). C210 ev ağında ve 8800 portu açık olmalı.`,
+          `Could not reach the camera (${endpoint.hostname}:${endpoint.port}). It must be on this network with port 8800 open.`,
         ),
       );
       void error;
     });
-    socket.setTimeout(10_000, () => fail(new Error("Kameraya bağlanırken zaman aşımı")));
+    socket.setTimeout(10_000, () => fail(new Error("Connecting to the camera timed out.")));
   });
 }
 
@@ -230,7 +230,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(done, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new Error("Çalma durduruldu"));
+      reject(new Error("Stopped."));
     };
     function done() {
       signal?.removeEventListener("abort", onAbort);
@@ -238,7 +238,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     if (signal?.aborted) {
       clearTimeout(timer);
-      reject(new Error("Çalma durduruldu"));
+      reject(new Error("Stopped."));
       return;
     }
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -257,26 +257,26 @@ export async function playAlawOnTapo(
     onProgress?: (progress: TalkProgress) => void;
   },
 ): Promise<{ durationMs: number; bytes: number }> {
-  if (!target.password) throw new Error("Bulut şifresi gerekli");
-  if (alaw.length === 0) throw new Error("Ses dosyası boş");
+  if (!target.password) throw new Error("Cloud password required.");
+  if (alaw.length === 0) throw new Error("The audio file is empty.");
 
   const endpoint = parseCameraHost(target.host);
   const hostHeader = `${endpoint.hostname}:${endpoint.port}`;
-  const socket = await openSocket(endpoint, options?.signal);
+  let socket = await openSocket(endpoint, options?.signal);
   socket.setTimeout(0);
-  const pump = new BytePump(socket);
+  let pump = new BytePump(socket);
 
   try {
     socket.write(httpRequest({ host: hostHeader }));
     const first = await pump.readHeader(8000);
     if (first.status !== 401) {
-      throw new Error(`Kamera beklenen kimlik doğrulamasını vermedi (${first.status || "yanıt yok"})`);
+      throw new Error(`The camera did not ask for a password (${first.status || "no response"}).`);
     }
     await discardBody(pump, first.headers);
 
     const www = first.headers.get("www-authenticate") ?? "";
     if (!www.toLowerCase().startsWith("digest")) {
-      throw new Error("Kamera Digest kimlik doğrulaması istemiyor");
+      throw new Error("The camera does not use digest authentication.");
     }
     const challenge = parseDigestChallenge(www);
     const password = target.passwordIsHash
@@ -291,16 +291,19 @@ export async function playAlawOnTapo(
     });
 
     if ((first.headers.get("connection") ?? "").toLowerCase() === "close") {
-      throw new Error("Kamera bağlantıyı kapatıyor; tekrar deneyin");
+      socket.destroy();
+      socket = await openSocket(endpoint, options?.signal);
+      socket.setTimeout(0);
+      pump = new BytePump(socket);
     }
 
     socket.write(httpRequest({ host: hostHeader, authorization }));
     const authed = await pump.readHeader(8000);
     if (authed.status === 401) {
-      throw new Error("Bulut şifresi kabul edilmedi. RTSP şifresi değil, Tapo hesap şifresi gerekli.");
+      throw new Error("Password rejected. Use the Tapo account password, not the RTSP password.");
     }
     if (authed.status !== 200) {
-      throw new Error(`Kamera akışı açılmadı (${authed.status})`);
+      throw new Error(`The camera did not open the stream (${authed.status}).`);
     }
     await discardBody(pump, authed.headers);
 
@@ -333,7 +336,7 @@ export async function playAlawOnTapo(
     const started = Date.now();
 
     for (let frame = 0; frame < totalFrames; frame++) {
-      if (options?.signal?.aborted) throw new Error("Çalma durduruldu");
+      if (options?.signal?.aborted) throw new Error("Stopped.");
       const slice = padded.subarray(frame * FRAME_BYTES, (frame + 1) * FRAME_BYTES);
       const packet = muxer.getPayload(pid, (frame + 1) * FRAME_BYTES, slice);
       assertTsPackets(packet);
