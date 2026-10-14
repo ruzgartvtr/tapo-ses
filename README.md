@@ -25,7 +25,7 @@ On Android, install the APK. The phone and the camera must be on the same networ
 - Sign in with the Tapo account password. The RTSP password is not accepted. The password stays on the device.
 - Camera list, sound library, and level (0–150) stay on the device.
 - Built-in sounds: Bell, Alert, Welcome.
-- One playback is limited to 90 seconds.
+- One playback can run for up to one hour.
 - Models: C210 (primary), C200, C220, C225, C100, C110, C310, C320WS, C500, C510W, D230.
 
 The C210 speaker is telephone quality. Short announcements are clearer.
