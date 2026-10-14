@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,10 +59,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val Accent = Color(0xFF0B57D0)
-private val Page = Color(0xFFF3F3F3)
-private val Ink = Color(0xFF1A1A1A)
-private val Muted = Color(0xFF5C5C5C)
+private val Talk = Color(0xFFC4342A)
+private val Page = Color(0xFFECEAE4)
+private val Ink = Color(0xFF1C1B19)
+private val Muted = Color(0xFF6B6760)
+private val Paper = Color(0xFFF7F6F3)
 
 private data class Camera(val id: String, val name: String, val model: String, val host: String)
 private data class Account(val email: String, val password: String)
@@ -78,6 +82,7 @@ private fun TapoApp(activity: Activity) {
     var needsCode by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    val cancel = remember { AtomicBoolean(false) }
     var volume by remember { mutableFloatStateOf(100f) }
     var sound by remember { mutableStateOf<Uri?>(null) }
     var soundName by remember { mutableStateOf("") }
@@ -91,7 +96,7 @@ private fun TapoApp(activity: Activity) {
         }
     }
 
-    MaterialTheme(colorScheme = lightColorScheme(primary = Accent, background = Page, surface = Color.White)) {
+    MaterialTheme(colorScheme = lightColorScheme(primary = Talk, background = Page, surface = Paper)) {
         Surface(modifier = Modifier.fillMaxSize(), color = Page) {
             if (account == null) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -128,7 +133,7 @@ private fun TapoApp(activity: Activity) {
                             }
                         },
                         enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                        colors = ButtonDefaults.buttonColors(containerColor = Talk),
                     ) { Text(if (needsCode) t("Verify", "Doğrula") else t("Sign in", "Giriş")) }
                     if (status.isNotEmpty()) Text(status, color = Ink)
                 }
@@ -136,7 +141,7 @@ private fun TapoApp(activity: Activity) {
                 Column(Modifier.fillMaxSize()) {
                     Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Tapo Ses", fontWeight = FontWeight.SemiBold, color = Ink)
-                        Text(t("Sign out", "Çıkış"), color = Accent, modifier = Modifier.clickable {
+                        Text(t("Sign out", "Çıkış"), color = Talk, modifier = Modifier.clickable {
                             account = null
                             prefs.edit().remove("account").apply()
                         })
@@ -144,7 +149,7 @@ private fun TapoApp(activity: Activity) {
                     LazyColumn(Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(cameras) { camera ->
                             Column(
-                                Modifier.fillMaxWidth().background(if (camera.id == selected) Color(0xFFE8F0FE) else Color.White, RoundedCornerShape(8.dp)).clickable { selected = camera.id }.padding(12.dp),
+                                Modifier.fillMaxWidth().background(if (camera.id == selected) Color(0xFFD5E4F2) else Color.White, RoundedCornerShape(10.dp)).clickable { selected = camera.id }.padding(12.dp),
                             ) {
                                 Text(camera.name, fontWeight = FontWeight.Medium, color = Ink)
                                 Text("${camera.model}  ${camera.host.ifBlank { t("No address", "Adres yok") }}", color = Muted, fontSize = 13.sp)
@@ -166,10 +171,10 @@ private fun TapoApp(activity: Activity) {
                                     name = ""
                                     host = ""
                                 }
-                            }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text(t("Add", "Ekle")) }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = Talk)) { Text(t("Add", "Ekle")) }
                         }
                     }
-                    Column(Modifier.background(Color.White).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.background(Paper).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(soundName.ifBlank { t("No audio selected", "Ses seçilmedi") }, color = Ink)
                         Text(t("Level ${volume.toInt()}", "Seviye ${volume.toInt()}"), color = Muted, fontSize = 13.sp)
                         Slider(volume, { volume = it }, valueRange = 0f..150f)
@@ -184,21 +189,27 @@ private fun TapoApp(activity: Activity) {
                                     file == null -> status = t("Choose an audio file.", "Bir ses dosyası seç.")
                                     signed == null -> status = ""
                                     else -> {
+                                        cancel.set(false)
                                         busy = true
                                         status = t("Sending…", "Gönderiliyor…")
                                         scope.launch {
                                             val message = withContext(Dispatchers.IO) {
                                                 runCatching {
-                                                    val ms = playFileOnCamera(activity, file, camera.host, signed.password, volume.toInt(), english) { false }
-                                                    t("Played on ${camera.name} (${ms / 1000}s).", "${camera.name} üzerinden çalındı (${ms / 1000} sn).")
-                                                }.getOrElse { it.message ?: t("Playback failed.", "Ses çalınamadı.") }
+                                                    val ms = playFileOnCamera(activity, file, camera.host, signed.password, volume.toInt(), english) { cancel.get() }
+                                                    if (cancel.get()) t("Stopped.", "Durduruldu.")
+                                                    else t("Played on ${camera.name} (${ms / 1000}s).", "${camera.name} üzerinden çalındı (${ms / 1000} sn).")
+                                                }.getOrElse { error ->
+                                                    val text = error.message ?: t("Playback failed.", "Ses çalınamadı.")
+                                                    if (text.contains("Stopped") || text.contains("Durduruldu")) t("Stopped.", "Durduruldu.") else text
+                                                }
                                             }
                                             busy = false
                                             status = message
                                         }
                                     }
                                 }
-                            }, enabled = !busy, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text(t("Play", "Çal")) }
+                            }, enabled = !busy, shape = CircleShape, modifier = Modifier.size(64.dp), colors = ButtonDefaults.buttonColors(containerColor = Talk)) { Text(if (busy) "■" else "▶") }
+                            OutlinedButton(onClick = { cancel.set(true) }, enabled = busy) { Text(t("Stop", "Durdur")) }
                         }
                         if (status.isNotEmpty()) Text(status, color = Ink)
                     }
