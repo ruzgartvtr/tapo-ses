@@ -1,5 +1,5 @@
 import { deflateSync } from "node:zlib";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 const size = 512;
 const raw = Buffer.alloc((size * 4 + 1) * size);
@@ -72,4 +72,6 @@ const png = Buffer.concat([
   chunk("IDAT", deflateSync(raw)),
   chunk("IEND", Buffer.alloc(0)),
 ]);
-writeFileSync(new URL("../build/icon.png", import.meta.url), png);
+const iconUrl = new URL("../build/icon.png", import.meta.url);
+mkdirSync(new URL("../build/", import.meta.url), { recursive: true });
+writeFileSync(iconUrl, png);
