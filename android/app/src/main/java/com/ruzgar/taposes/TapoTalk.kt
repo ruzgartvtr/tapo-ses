@@ -15,7 +15,6 @@ import kotlin.math.roundToInt
 private const val FRAME = 160
 private const val RATE = 8000
 private const val MAX_SECONDS = 90
-private const val CHUNK = 7 * RATE
 
 fun playFileOnCamera(
     context: Context,
@@ -25,10 +24,9 @@ fun playFileOnCamera(
     volume: Int,
     english: Boolean,
     cancelled: () -> Boolean,
-    onPart: (Int, Int) -> Unit = { _, _ -> },
 ): Int {
     val alaw = fileToAlaw(context, uri, volume, english)
-    return playAlaw(host, password, alaw, english, cancelled, onPart)
+    return playAlaw(host, password, alaw, english, cancelled)
 }
 
 fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteArray {
@@ -190,40 +188,17 @@ private fun linearToAlaw(sample: Int): Int {
     return ((seg shl 4) or mantissa) xor mask
 }
 
-fun playAlaw(
-    host: String,
-    password: String,
-    alaw: ByteArray,
-    english: Boolean,
-    cancelled: () -> Boolean,
-    onPart: (Int, Int) -> Unit = { _, _ -> },
-): Int {
+fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, cancelled: () -> Boolean): Int {
     if (password.isEmpty()) error(if (english) "Cloud password required." else "Bulut şifresi gerekli.")
     if (alaw.isEmpty()) error(if (english) "The audio file is empty." else "Ses dosyası boş.")
-    val partCount = (alaw.size + CHUNK - 1) / CHUNK
-    var offset = 0
-    var played = 0
-    var part = 1
-    while (offset < alaw.size) {
-        if (cancelled()) error(if (english) "Stopped." else "Durduruldu.")
-        val end = min(offset + CHUNK, alaw.size)
-        onPart(part, partCount)
-        played += playSession(host, password, alaw.copyOfRange(offset, end), english, cancelled)
-        offset = end
-        part += 1
-        if (offset < alaw.size) Thread.sleep(400)
-    }
-    return played
-}
-
-private fun playSession(host: String, password: String, alaw: ByteArray, english: Boolean, cancelled: () -> Boolean): Int {
     val parts = host.trim().split(":")
     val hostname = parts[0]
     val port = parts.getOrNull(1)?.toIntOrNull() ?: 8800
     var socket = open(hostname, port)
+    var incoming = Incoming(socket)
     try {
         writeAll(socket, http(hostname, port, null))
-        val first = readHeader(socket)
+        val first = readHeader(incoming)
         if (first.status != 401) error(if (english) "The camera did not ask for a password." else "Kamera şifre istemedi.")
         val challenge = digest(first.header("www-authenticate"))
         val hashed = hash(password, challenge.encrypt)
@@ -231,24 +206,14 @@ private fun playSession(host: String, password: String, alaw: ByteArray, english
         if (first.header("connection").equals("close", true)) {
             socket.close()
             socket = open(hostname, port)
+            incoming = Incoming(socket)
         }
         writeAll(socket, http(hostname, port, authorization))
-        val authed = readHeader(socket)
+        val authed = readHeader(incoming)
         if (authed.status == 401) error(if (english) "Password rejected. Use the Tapo account password." else "Şifre kabul edilmedi. Tapo hesap şifresi gerekli.")
         if (authed.status != 200) error(if (english) "The camera did not open the stream (${authed.status})." else "Kamera akışı açılmadı (${authed.status}).")
         writeAll(socket, jsonPart("""{"params":{"talk":{"mode":"aec"},"method":"get"},"seq":3,"type":"request"}"""))
-        val session = readSession(socket, english)
-        socket.soTimeout = 0
-        val drain = Thread {
-            val input = socket.getInputStream()
-            val buf = ByteArray(1024)
-            try {
-                while (input.read(buf) >= 0) Unit
-            } catch (_: Exception) {
-            }
-        }
-        drain.isDaemon = true
-        drain.start()
+        val session = readSession(incoming, english)
         val muxer = PcmaMuxer()
         val pid = muxer.addTrack()
         sendTs(socket, session, muxer.header())
@@ -260,21 +225,74 @@ private fun playSession(host: String, password: String, alaw: ByteArray, english
         val started = System.currentTimeMillis()
         for (frame in 0 until frames) {
             if (cancelled()) error(if (english) "Stopped." else "Durduruldu.")
+            incoming.discard()
             val slice = padded.copyOfRange(frame * FRAME, (frame + 1) * FRAME)
             sendTs(socket, session, muxer.payload(pid, (frame + 1) * FRAME, slice))
             val due = started + ((frame + 1) * FRAME * 1000L) / RATE
             val wait = due - System.currentTimeMillis()
             if (wait > 0) Thread.sleep(wait)
         }
-        return (padded.size * 1000) / RATE
+        return (alaw.size * 1000) / RATE
     } finally {
         runCatching { socket.close() }
     }
 }
 
+private class Incoming(socket: Socket) {
+    private val queue = ArrayDeque<Byte>()
+    private val lock = Object()
+    @Volatile private var ended = false
+
+    init {
+        Thread {
+            val input = socket.getInputStream()
+            val buf = ByteArray(8192)
+            try {
+                while (true) {
+                    val count = input.read(buf)
+                    if (count < 0) break
+                    synchronized(lock) {
+                        for (index in 0 until count) queue.addLast(buf[index])
+                        lock.notifyAll()
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                synchronized(lock) {
+                    ended = true
+                    lock.notifyAll()
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "tapo-in"
+            start()
+        }
+    }
+
+    fun readByte(timeoutMs: Long): Int {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        synchronized(lock) {
+            while (queue.isEmpty() && !ended) {
+                val left = deadline - System.currentTimeMillis()
+                if (left <= 0) return -1
+                lock.wait(left)
+            }
+            if (queue.isEmpty()) return -1
+            return queue.removeFirst().toInt() and 0xff
+        }
+    }
+
+    fun discard() {
+        synchronized(lock) { queue.clear() }
+    }
+}
+
 private fun open(host: String, port: Int): Socket = Socket().apply {
+    receiveBufferSize = 1024 * 1024
+    sendBufferSize = 512 * 1024
     tcpNoDelay = true
-    soTimeout = 12000
+    soTimeout = 0
     connect(InetSocketAddress(host, port), 8000)
 }
 
@@ -288,13 +306,12 @@ private class Header(val status: Int, val lines: Map<String, String>) {
     fun header(name: String) = lines[name.lowercase()] ?: ""
 }
 
-private fun readHeader(socket: Socket): Header {
-    val input = socket.getInputStream()
+private fun readHeader(incoming: Incoming): Header {
     val raw = StringBuilder()
-    val one = ByteArray(1)
     while (!raw.endsWith("\r\n\r\n") && raw.length < 8192) {
-        if (input.read(one) < 0) break
-        raw.append((one[0].toInt() and 0xff).toChar())
+        val byte = incoming.readByte(12000)
+        if (byte < 0) break
+        raw.append(byte.toChar())
     }
     val text = raw.toString()
     val status = Regex("HTTP/1\\.[01] (\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
@@ -304,28 +321,17 @@ private fun readHeader(socket: Socket): Header {
         if (colon > 0) lines[line.substring(0, colon).trim().lowercase()] = line.substring(colon + 1).trim()
     }
     val length = lines["content-length"]?.toIntOrNull() ?: 0
-    if (length > 0) readExact(input, length)
+    repeat(length) { incoming.readByte(12000) }
     return Header(status, lines)
 }
 
-private fun readExact(input: java.io.InputStream, length: Int) {
-    var left = length
-    val buf = ByteArray(min(left, 4096))
-    while (left > 0) {
-        val n = input.read(buf, 0, min(left, buf.size))
-        if (n < 0) return
-        left -= n
-    }
-}
-
-private fun readSession(socket: Socket, english: Boolean): String {
-    val input = socket.getInputStream()
+private fun readSession(incoming: Incoming, english: Boolean): String {
     val window = StringBuilder()
-    val one = ByteArray(1)
     val deadline = System.currentTimeMillis() + 12000
     while (System.currentTimeMillis() < deadline && window.length < 16384) {
-        if (input.read(one) < 0) break
-        window.append((one[0].toInt() and 0xff).toChar())
+        val byte = incoming.readByte(12000)
+        if (byte < 0) break
+        window.append(byte.toChar())
         val text = window.toString()
         val id = Regex(""""session_?[Ii]d"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
         if (!id.isNullOrEmpty()) return id

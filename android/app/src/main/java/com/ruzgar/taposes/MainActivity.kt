@@ -220,12 +220,7 @@ private fun TapoApp(activity: Activity) {
                                         scope.launch {
                                             val message = withContext(Dispatchers.IO) {
                                                 runCatching {
-                                                    val ms = playFileOnCamera(activity, file, camera.host, signed.password, volume.toInt(), english, { cancel.get() }) { part, total ->
-                                                        if (total > 1) {
-                                                            val text = if (english) "Part $part of $total…" else "Parça $part / $total…"
-                                                            android.os.Handler(android.os.Looper.getMainLooper()).post { status = text }
-                                                        }
-                                                    }
+                                                    val ms = playFileOnCamera(activity, file, camera.host, signed.password, volume.toInt(), english) { cancel.get() }
                                                     if (cancel.get()) t("Stopped.", "Durduruldu.")
                                                     else t("Played on ${camera.name} (${ms / 1000}s).", "${camera.name} üzerinden çalındı (${ms / 1000} sn).")
                                                 }.getOrElse { error ->
