@@ -2,6 +2,7 @@ package com.ruzgar.taposes
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -33,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,9 +93,32 @@ private fun TapoApp(activity: Activity) {
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            runCatching {
+                activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             sound = uri
             soundName = uri.lastPathSegment?.substringAfterLast('/') ?: "audio"
         }
+    }
+    LaunchedEffect(account?.email) {
+        if (account == null) return@LaunchedEffect
+        val previous = status
+        status = if (english) "Looking for the camera…" else "Kamera aranıyor…"
+        val ips = withContext(Dispatchers.IO) { discoverCameraAddresses(activity) }
+        if (ips.isEmpty()) {
+            if (cameras.none { it.host.isNotBlank() }) {
+                status = if (english) "No camera found on this network." else "Bu ağda kamera bulunamadı."
+            } else {
+                status = previous
+            }
+            return@LaunchedEffect
+        }
+        val filled = assignAddresses(cameras, ips)
+        cameras = filled
+        saveCameras(prefs, filled)
+        selected = filled.firstOrNull { it.host.isNotBlank() }?.id ?: selected
+        if (host.isBlank()) host = ips.first()
+        status = if (english) "Camera address ${filled.firstOrNull { it.host.isNotBlank() }?.host ?: ips.first()}" else "Kamera adresi ${filled.firstOrNull { it.host.isNotBlank() }?.host ?: ips.first()}"
     }
 
     MaterialTheme(colorScheme = lightColorScheme(primary = Talk, background = Page, surface = Paper)) {
@@ -215,6 +240,23 @@ private fun TapoApp(activity: Activity) {
                     }
                 }
             }
+        }
+    }
+}
+
+private fun assignAddresses(cameras: List<Camera>, ips: List<String>): List<Camera> {
+    if (ips.isEmpty()) return cameras
+    if (cameras.isEmpty()) {
+        return ips.map { Camera(java.util.UUID.randomUUID().toString(), "C210", "C210", it) }
+    }
+    val unused = ips.toMutableList()
+    return cameras.map { camera ->
+        if (camera.host.isNotBlank()) {
+            unused.remove(camera.host)
+            camera
+        } else {
+            val ip = unused.removeFirstOrNull() ?: return@map camera
+            camera.copy(host = ip)
         }
     }
 }

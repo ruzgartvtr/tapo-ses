@@ -5,6 +5,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import java.nio.ByteOrder
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
@@ -30,67 +31,117 @@ fun playFileOnCamera(
 
 fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteArray {
     val extractor = MediaExtractor()
-    extractor.setDataSource(context, uri, null)
-    var track = -1
-    var format: MediaFormat? = null
-    for (i in 0 until extractor.trackCount) {
-        val candidate = extractor.getTrackFormat(i)
-        if (candidate.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
-            track = i
-            format = candidate
-            break
+    try {
+        extractor.setDataSource(context, uri, null)
+        var track = -1
+        var format: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val candidate = extractor.getTrackFormat(i)
+            if (candidate.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                track = i
+                format = candidate
+                break
+            }
         }
-    }
-    if (track < 0 || format == null) {
+        if (track < 0 || format == null) error(if (english) "That file has no audio." else "Dosyada ses yok.")
+        extractor.selectTrack(track)
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+        val decoded = if (mime == "audio/raw" || mime == "audio/wav" || mime == "audio/x-wav") {
+            Decoded(readPcm(extractor), decoderOutput(format).sampleRate, decoderOutput(format).channels)
+        } else {
+            decodeCompressed(extractor, format, mime, english)
+        }
+        if (decoded.pcm.isEmpty()) error(if (english) "That file has no audio." else "Dosyada ses yok.")
+        return resampleToAlaw(decoded, volume)
+    } catch (error: IllegalStateException) {
+        throw error
+    } catch (error: Exception) {
+        throw IllegalStateException(if (english) "The audio file could not be read." else "Ses dosyası okunamadı.", error)
+    } finally {
         extractor.release()
-        error(if (english) "That file has no audio." else "Dosyada ses yok.")
     }
-    extractor.selectTrack(track)
-    val mime = format.getString(MediaFormat.KEY_MIME)!!
+}
+
+private data class Decoded(val pcm: List<Short>, val sampleRate: Int, val channels: Int)
+
+private fun readPcm(extractor: MediaExtractor): List<Short> {
+    val pcm = ArrayList<Short>()
+    val buffer = java.nio.ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN)
+    while (pcm.size < RATE * MAX_SECONDS) {
+        buffer.clear()
+        val size = extractor.readSampleData(buffer, 0)
+        if (size < 0) break
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.position(0)
+        buffer.limit(size)
+        while (buffer.remaining() >= 2 && pcm.size < RATE * MAX_SECONDS) pcm.add(buffer.short)
+        extractor.advance()
+    }
+    return pcm
+}
+
+private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mime: String, english: Boolean): Decoded {
+    if (!format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
     val decoder = MediaCodec.createDecoderByType(mime)
-    decoder.configure(format, null, null, 0)
-    decoder.start()
-    val pcm = ArrayList<Short>(RATE * 4)
-    val info = MediaCodec.BufferInfo()
-    var inputDone = false
-    var outputDone = false
-    while (!outputDone && pcm.size < RATE * MAX_SECONDS) {
-        if (!inputDone) {
-            val index = decoder.dequeueInputBuffer(10_000)
-            if (index >= 0) {
-                val buffer = decoder.getInputBuffer(index)!!
-                val size = extractor.readSampleData(buffer, 0)
-                if (size < 0) {
-                    decoder.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                    inputDone = true
-                } else {
-                    decoder.queueInputBuffer(index, 0, size, extractor.sampleTime, 0)
-                    extractor.advance()
+    var sampleRate = decoderOutput(format).sampleRate
+    var channels = decoderOutput(format).channels
+    val pcm = ArrayList<Short>()
+    try {
+        decoder.configure(format, null, null, 0)
+        decoder.start()
+        val info = MediaCodec.BufferInfo()
+        var inputDone = false
+        var outputDone = false
+        val deadline = System.currentTimeMillis() + 20_000
+        while (!outputDone && pcm.size < RATE * MAX_SECONDS && System.currentTimeMillis() < deadline) {
+            if (!inputDone) {
+                val index = decoder.dequeueInputBuffer(10_000)
+                if (index >= 0) {
+                    val buffer = decoder.getInputBuffer(index)!!
+                    val size = extractor.readSampleData(buffer, 0)
+                    if (size < 0) {
+                        decoder.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        inputDone = true
+                    } else {
+                        decoder.queueInputBuffer(index, 0, size, extractor.sampleTime, 0)
+                        extractor.advance()
+                    }
+                }
+            }
+            when (val index = decoder.dequeueOutputBuffer(info, 10_000)) {
+                MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
+                MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    val out = decoder.outputFormat
+                    if (out.containsKey(MediaFormat.KEY_SAMPLE_RATE)) sampleRate = out.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(8000)
+                    if (out.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                }
+                else -> if (index >= 0) {
+                    if (info.size > 0) {
+                        val buffer = decoder.getOutputBuffer(index)!!
+                        buffer.order(ByteOrder.LITTLE_ENDIAN)
+                        buffer.position(info.offset)
+                        buffer.limit(info.offset + info.size)
+                        while (buffer.remaining() >= 2 && pcm.size < RATE * MAX_SECONDS) pcm.add(buffer.short)
+                    }
+                    outputDone = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    decoder.releaseOutputBuffer(index, false)
                 }
             }
         }
-        when (val index = decoder.dequeueOutputBuffer(info, 10_000)) {
-            MediaCodec.INFO_TRY_AGAIN_LATER, MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
-            else -> if (index >= 0) {
-                if (info.size > 0) {
-                    val buffer = decoder.getOutputBuffer(index)!!
-                    buffer.position(info.offset)
-                    buffer.limit(info.offset + info.size)
-                    while (buffer.remaining() >= 2) pcm.add(buffer.short)
-                }
-                outputDone = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                decoder.releaseOutputBuffer(index, false)
-            }
-        }
+    } catch (error: Exception) {
+        throw IllegalStateException(if (english) "The audio file could not be read." else "Ses dosyası okunamadı.", error)
+    } finally {
+        runCatching { decoder.stop() }
+        runCatching { decoder.release() }
     }
-    decoder.stop()
-    decoder.release()
-    extractor.release()
-    val outFormat = decoderOutput(format)
-    val channels = outFormat.channels
-    val sampleRate = outFormat.sampleRate
+    return Decoded(pcm, sampleRate, channels)
+}
+
+private fun resampleToAlaw(decoded: Decoded, volume: Int): ByteArray {
+    val channels = decoded.channels.coerceAtLeast(1)
+    val pcm = decoded.pcm
     val gain = volume.coerceIn(0, 150) / 100f
-    val mono = ShortArray(pcm.size / channels.coerceAtLeast(1))
+    val mono = ShortArray(pcm.size / channels)
     var i = 0
     var o = 0
     while (i + channels <= pcm.size && o < mono.size) {
@@ -100,9 +151,9 @@ fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteA
         i += channels
         o += 1
     }
-    val count = min(o, RATE * MAX_SECONDS)
-    val ratio = sampleRate.toDouble() / RATE
-    val length = min(MAX_SECONDS * RATE, (count / ratio).toInt().coerceAtLeast(0))
+    val count = min(o, RATE * MAX_SECONDS).coerceAtLeast(1)
+    val ratio = decoded.sampleRate.toDouble() / RATE
+    val length = min(MAX_SECONDS * RATE, (count / ratio).toInt().coerceAtLeast(1))
     val alaw = ByteArray(length)
     for (n in 0 until length) {
         val source = min(count - 1, (n * ratio).roundToInt())
@@ -145,7 +196,7 @@ fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, 
     val port = parts.getOrNull(1)?.toIntOrNull() ?: 8800
     var socket = open(hostname, port)
     try {
-        socket.getOutputStream().write(http(hostname, port, null))
+        writeAll(socket, http(hostname, port, null))
         val first = readHeader(socket)
         if (first.status != 401) error(if (english) "The camera did not ask for a password." else "Kamera şifre istemedi.")
         val challenge = digest(first.header("www-authenticate"))
@@ -155,12 +206,13 @@ fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, 
             socket.close()
             socket = open(hostname, port)
         }
-        socket.getOutputStream().write(http(hostname, port, authorization))
+        writeAll(socket, http(hostname, port, authorization))
         val authed = readHeader(socket)
         if (authed.status == 401) error(if (english) "Password rejected. Use the Tapo account password." else "Şifre kabul edilmedi. Tapo hesap şifresi gerekli.")
         if (authed.status != 200) error(if (english) "The camera did not open the stream (${authed.status})." else "Kamera akışı açılmadı (${authed.status}).")
-        socket.getOutputStream().write(jsonPart("""{"params":{"talk":{"mode":"aec"},"method":"get"},"seq":3,"type":"request"}"""))
-        val session = readSession(socket)
+        writeAll(socket, jsonPart("""{"params":{"talk":{"mode":"aec"},"method":"get"},"seq":3,"type":"request"}"""))
+        val session = readSession(socket, english)
+        socket.soTimeout = 0
         val muxer = PcmaMuxer()
         val pid = muxer.addTrack()
         sendTs(socket, session, muxer.header())
@@ -185,8 +237,15 @@ fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, 
 }
 
 private fun open(host: String, port: Int): Socket = Socket().apply {
-    soTimeout = 8000
+    tcpNoDelay = true
+    soTimeout = 12000
     connect(InetSocketAddress(host, port), 8000)
+}
+
+private fun writeAll(socket: Socket, bytes: ByteArray) {
+    val out = socket.getOutputStream()
+    out.write(bytes)
+    out.flush()
 }
 
 private class Header(val status: Int, val lines: Map<String, String>) {
@@ -199,7 +258,7 @@ private fun readHeader(socket: Socket): Header {
     val one = ByteArray(1)
     while (!raw.endsWith("\r\n\r\n") && raw.length < 8192) {
         if (input.read(one) < 0) break
-        raw.append(one[0].toInt().toChar())
+        raw.append((one[0].toInt() and 0xff).toChar())
     }
     val text = raw.toString()
     val status = Regex("HTTP/1\\.[01] (\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
@@ -209,22 +268,37 @@ private fun readHeader(socket: Socket): Header {
         if (colon > 0) lines[line.substring(0, colon).trim().lowercase()] = line.substring(colon + 1).trim()
     }
     val length = lines["content-length"]?.toIntOrNull() ?: 0
-    if (length > 0) input.readNBytes(length)
+    if (length > 0) readExact(input, length)
     return Header(status, lines)
 }
 
-private fun readSession(socket: Socket): String {
+private fun readExact(input: java.io.InputStream, length: Int) {
+    var left = length
+    val buf = ByteArray(min(left, 4096))
+    while (left > 0) {
+        val n = input.read(buf, 0, min(left, buf.size))
+        if (n < 0) return
+        left -= n
+    }
+}
+
+private fun readSession(socket: Socket, english: Boolean): String {
     val input = socket.getInputStream()
     val window = StringBuilder()
     val one = ByteArray(1)
-    val deadline = System.currentTimeMillis() + 8000
-    while (System.currentTimeMillis() < deadline) {
+    val deadline = System.currentTimeMillis() + 12000
+    while (System.currentTimeMillis() < deadline && window.length < 16384) {
         if (input.read(one) < 0) break
-        window.append(one[0].toInt().toChar())
-        val match = Regex(""""session_id"\s*:\s*"?([0-9A-Za-z-]+)""").find(window)
-        if (match != null) return match.groupValues[1]
+        window.append((one[0].toInt() and 0xff).toChar())
+        val text = window.toString()
+        val id = Regex(""""session_?[Ii]d"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+        if (!id.isNullOrEmpty()) return id
+        val code = Regex(""""error_code"\s*:\s*(-?\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+        if (code != null && code != 0 && text.contains('}')) {
+            error(if (english) "The camera rejected the talk request ($code)." else "Kamera konuşmayı reddetti ($code).")
+        }
     }
-    error("session")
+    error(if (english) "The camera did not start a talk session." else "Kameradan konuşma oturumu gelmedi.")
 }
 
 private data class Challenge(val realm: String, val nonce: String, val qop: String, val opaque: String, val encrypt: String)
@@ -273,6 +347,7 @@ private fun sendTs(socket: Socket, session: String, body: ByteArray) {
     val out = socket.getOutputStream()
     out.write(head.toByteArray())
     out.write(body)
+    out.flush()
 }
 
 private class BitWriter {

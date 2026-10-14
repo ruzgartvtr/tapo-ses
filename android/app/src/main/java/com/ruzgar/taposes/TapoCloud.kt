@@ -92,7 +92,9 @@ object TapoCloud {
             if (type.isNotEmpty() && !type.contains("CAMERA")) continue
             val raw = listOf(device.optString("deviceModel"), device.optString("deviceName"), device.optString("alias")).joinToString(" ")
             val model = Regex("C\\d{3}WS|C\\d{3}W|C\\d{3}|D\\d{3}").find(raw.uppercase())?.value ?: "C210"
-            val host = device.optString("ip").trim()
+            val host = listOf("ip", "deviceIp", "localIp", "lanIp").firstNotNullOfOrNull { key ->
+                device.optString(key).trim().takeIf { it.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}")) }
+            }.orEmpty()
             val name = device.optString("alias").ifBlank { device.optString("deviceName").ifBlank { model } }
             val id = device.optString("deviceId").ifBlank { "$name-$host" }
             cameras += CloudCamera(id, name, model, if (host.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}"))) host else "")
