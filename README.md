@@ -6,26 +6,16 @@ The interface language follows the system. English is the default. Turkish is us
 
 ## Install
 
-Desktop packages: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.1.0
+Packages: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.2.0
 
-- Windows x64: `Tapo.Ses-0.1.0-win.zip`
-- macOS Apple silicon: `Tapo.Ses-0.1.0-arm64-mac.zip`
-- macOS Intel: `Tapo.Ses-0.1.0-mac.zip`
+- Android: `Tapo.Ses-0.2.0.apk`
+- Windows x64: `Tapo.Ses-0.2.0-win.zip`
+- Linux x64: `Tapo.Ses-0.2.0-x86_64.AppImage` and `Tapo.Ses-0.2.0-amd64.deb`
+- Linux arm64: `Tapo.Ses-0.2.0-arm64.AppImage` and `Tapo.Ses-0.2.0-arm64.deb`
+- macOS Apple silicon: `Tapo.Ses-0.2.0-arm64-mac.zip`
+- macOS Intel: `Tapo.Ses-0.2.0-mac.zip`
 
-On macOS, if Gatekeeper reports the app as damaged, right-click `Ac.command` and choose Open.
-
-Linux packages are built from this repository:
-
-```bash
-npm install
-npm run dist:linux
-```
-
-That produces an AppImage and a `.deb` for x64 and arm64.
-
-Android 0.2.0: https://github.com/ruzgartvtr/tapo-ses/releases/download/v0.2.0/Tapo.Ses-0.2.0.apk
-
-Install the APK on the phone. The phone and the camera must be on the same network. English is the default; Turkish follows the phone language. Source is in the `android` directory.
+On Android, install the APK. The phone and the camera must be on the same network. On macOS, if Gatekeeper reports the app as damaged, right-click `Ac.command` and choose Open.
 
 ## What it does
 

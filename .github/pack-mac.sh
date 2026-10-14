@@ -21,5 +21,6 @@ EOF
   (cd "$dir" && zip -r -y -q "$root/release/$zipname" "Tapo Ses.app" "Ac.command")
 }
 
-pack "release/mac-arm64/Tapo Ses.app" "Tapo Ses-0.1.0-arm64-mac.zip"
-pack "release/mac/Tapo Ses.app" "Tapo Ses-0.1.0-mac.zip"
+version="$(node -p "require('./package.json').version")"
+pack "release/mac-arm64/Tapo Ses.app" "Tapo.Ses-${version}-arm64-mac.zip"
+pack "release/mac/Tapo Ses.app" "Tapo.Ses-${version}-mac.zip"
