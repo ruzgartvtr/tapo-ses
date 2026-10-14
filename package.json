@@ -1,6 +1,6 @@
 {
   "name": "tapo-ses",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Play your own audio through a Tapo camera speaker on Windows, macOS, Linux, and Android.",
   "author": "Tapo Ses",
@@ -65,7 +65,8 @@
     },
     "win": {
       "target": ["nsis", "zip"],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "artifactName": "Tapo.Ses-${version}-win.${ext}"
     },
     "nsis": {
       "oneClick": false,
