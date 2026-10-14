@@ -1,5 +1,4 @@
 name: Release packages
-# Windows x64, macOS Intel, and macOS Apple silicon.
 on:
   push:
     paths:
@@ -7,46 +6,28 @@ on:
 permissions:
   contents: write
 jobs:
-  packages:
-    runs-on: ubuntu-latest
+  mac:
+    runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
+      - name: Build macOS packages
         env:
           NODE_ENV: development
-        run: |
-          set -o pipefail
-          npm install --include=dev > /tmp/step.log 2>&1 || { echo "::error title=Install::$(tail -n 8 /tmp/step.log | tr '\n' ' ')"; exit 1; }
-      - name: Fetch ffmpeg
-        run: |
-          set -o pipefail
-          npm run fetch:ffmpeg > /tmp/step.log 2>&1 || { echo "::error title=Fetch ffmpeg::$(tail -n 8 /tmp/step.log | tr '\n' ' ')"; exit 1; }
-      - name: Build app
-        run: |
-          set -o pipefail
-          npm run build > /tmp/step.log 2>&1 || { echo "::error title=Build app::$(tail -n 8 /tmp/step.log | tr '\n' ' ')"; exit 1; }
-      - name: Package Windows
-        env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          set -o pipefail
-          npx electron-builder --publish never --win zip --x64 > /tmp/step.log 2>&1 || { echo "::error title=Package Windows::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
-      - name: Package macOS
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          set -o pipefail
-          npx electron-builder --publish never --mac zip --x64 --arm64 > /tmp/step.log 2>&1 || { echo "::error title=Package macOS::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
-      - name: Attach packages to v0.1.0
+          set -euo pipefail
+          npm install --include=dev
+          npm run fetch:ffmpeg
+          npm run build
+          npx electron-builder --publish never --mac zip --x64 --arm64 --config.mac.identity=-
+          bash .github/pack-mac.sh
+      - name: Attach macOS packages
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          shopt -s nullglob
-          files=(release/*.zip)
-          test "${#files[@]}" -ge 3
-          gh release upload v0.1.0 "${files[@]}" --repo "${{ github.repository }}" --clobber
+          gh release upload v0.1.0 "release/Tapo Ses-0.1.0-mac.zip" "release/Tapo Ses-0.1.0-arm64-mac.zip" --repo "${{ github.repository }}" --clobber
           gh release edit v0.1.0 --repo "${{ github.repository }}" --notes-file .github/v0.1.0.md
