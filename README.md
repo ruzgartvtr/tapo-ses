@@ -8,7 +8,7 @@ Paketler: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.1.0
 - macOS Apple silicon: `Tapo Ses-0.1.0-arm64-mac.zip`
 - macOS Intel: `Tapo Ses-0.1.0-mac.zip`
 
-Zip’i açıp uygulamayı çalıştır. macOS paketleri imzasızdır; ilk açılışta sistem uyarısı çıkar.
+Zip’i açıp uygulamayı çalıştır. macOS “hasar görmüş” derse `Ac.command` dosyasına sağ tıkla ve Aç.
 
 ## Bu sürüm
 
