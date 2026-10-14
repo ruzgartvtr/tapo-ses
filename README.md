@@ -23,7 +23,9 @@ npm run dist:linux
 
 That produces an AppImage and a `.deb` for x64 and arm64.
 
-Android: open the `android` directory in Android Studio and run the `app` module. It is a native Kotlin app. English is the default; Turkish follows the phone language.
+Android 0.2.0: https://github.com/ruzgartvtr/tapo-ses/releases/download/v0.2.0/Tapo.Ses-0.2.0.apk
+
+Install the APK on the phone. The phone and the camera must be on the same network. English is the default; Turkish follows the phone language. Source is in the `android` directory.
 
 ## What it does
 
