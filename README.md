@@ -8,7 +8,7 @@ The interface language follows the system. English is the default. Turkish is us
 
 Packages: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.2.0
 
-- Android: `Tapo.Ses-0.2.1.apk`
+- Android: `Tapo.Ses-0.2.0.apk`
 - Windows x64: `Tapo.Ses-0.2.0-win.zip`
 - Linux x64: `Tapo.Ses-0.2.0-x86_64.AppImage` and `Tapo.Ses-0.2.0-amd64.deb`
 - Linux arm64: `Tapo.Ses-0.2.0-arm64.AppImage` and `Tapo.Ses-0.2.0-arm64.deb`
