@@ -1,4 +1,5 @@
 name: Release packages
+# macOS packages are signed on a Mac and include Ac.command.
 on:
   push:
     paths:
