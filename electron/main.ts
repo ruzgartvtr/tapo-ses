@@ -24,7 +24,7 @@ function createWindow() {
     height: 880,
     minWidth: 860,
     minHeight: 640,
-    backgroundColor: "#f3f3f3",
+    backgroundColor: "#eceae4",
     title: "Tapo Ses",
     autoHideMenuBar: true,
     webPreferences: {

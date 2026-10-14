@@ -1,5 +1,6 @@
 name: Release packages
 # macOS packages are signed on a Mac and include Ac.command.
+# A change to this file rebuilds the macOS and Linux packages.
 on:
   push:
     paths:
