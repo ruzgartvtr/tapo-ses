@@ -11,9 +11,9 @@
     "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --outdir=dist-electron --external:electron",
     "build": "node scripts/icon.mjs && npm run build:renderer && npm run build:electron",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
-    "dist": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win zip --x64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip --x64 --arm64",
-    "dist:win": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis zip --x64",
-    "dist:mac": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip dmg --x64 --arm64",
+    "dist": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --win zip --x64 && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --mac zip --x64 --arm64",
+    "dist:win": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --win nsis zip --x64",
+    "dist:mac": "npm run fetch:ffmpeg && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --mac zip dmg --x64 --arm64",
     "start": "npm run build && electron .",
     "bridge": "tsx bridge/server.ts",
     "test": "tsx --test lib/tapo/*.test.ts"
