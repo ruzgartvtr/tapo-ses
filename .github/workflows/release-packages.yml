@@ -1,4 +1,5 @@
 name: Release packages
+# Windows x64, macOS Intel, and macOS Apple silicon.
 on:
   push:
     paths:
