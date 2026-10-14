@@ -2,6 +2,14 @@
 
 Windows ve macOS uygulaması. Tapo C210 ve aynı konuşma kanalını kullanan Tapo kameraların hoparlöründen ses dosyası çalar.
 
+Paketler: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.1.0
+
+- Windows x64: `Tapo Ses-0.1.0-win.zip` içindeki `Tapo Ses.exe`
+- macOS Apple silicon: `Tapo Ses-0.1.0-arm64-mac.zip`
+- macOS Intel: `Tapo Ses-0.1.0-mac.zip`
+
+Zip’i açıp uygulamayı çalıştır. macOS paketleri imzasızdır; ilk açılışta sistem uyarısı çıkar.
+
 ## Bu sürüm
 
 - MP3, WAV, M4A ve OGG dosyaları 8 kHz mono PCMA’ya çevrilir.
@@ -15,17 +23,10 @@ Windows ve macOS uygulaması. Tapo C210 ve aynı konuşma kanalını kullanan Ta
 
 C210 hoparlörü telefon kalitesindedir. Kısa anonslar daha net duyulur.
 
-## Paket
-
-Kurulum dosyası bu sürümle birlikte yüklenmedi. Paket kaynak koddan çıkar:
+## Kaynak
 
 ```bash
 npm install
+npm run dev
 npm run dist
 ```
-
-- Windows x64: `Tapo Ses-0.1.0-win.zip`
-- macOS Apple silicon: `Tapo Ses-0.1.0-arm64-mac.zip`
-- macOS Intel: `Tapo Ses-0.1.0-mac.zip`
-
-macOS paketleri imzasızdır. İlk açılışta sistem uyarısı çıkar.
