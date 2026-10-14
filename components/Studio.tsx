@@ -353,19 +353,21 @@ export function Studio() {
   if (!account) {
     return (
       <main className="gate">
+        <aside className="gate-side">
+          <strong>{t("app.name")}</strong>
+          <p>{t("auth.lead")}</p>
+        </aside>
         <form
-          className="card"
+          className="gate-form"
           onSubmit={(event) => {
             event.preventDefault();
             saveAccount();
           }}
         >
           <div className="card-top">
-            <strong>{t("app.name")}</strong>
+            <h1>{t("auth.title")}</h1>
             {langs}
           </div>
-          <h1>{t("auth.title")}</h1>
-          <p className="lead">{t("auth.lead")}</p>
           <label>
             {t("auth.email")}
             <input
@@ -373,7 +375,7 @@ export function Studio() {
               autoComplete="username"
               inputMode="email"
               value={login.email}
-              onChange={(event) => setLogin({ ...login, email: event.target.value })}
+              onChange={(event) => setLogin((current) => ({ ...current, email: event.target.value }))}
             />
           </label>
           <label>
@@ -382,7 +384,7 @@ export function Studio() {
               type="password"
               autoComplete="current-password"
               value={login.password}
-              onChange={(event) => setLogin({ ...login, password: event.target.value })}
+              onChange={(event) => setLogin((current) => ({ ...current, password: event.target.value }))}
             />
           </label>
           {needsCode && (
@@ -392,7 +394,7 @@ export function Studio() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 value={login.code}
-                onChange={(event) => setLogin({ ...login, code: event.target.value })}
+                onChange={(event) => setLogin((current) => ({ ...current, code: event.target.value }))}
               />
             </label>
           )}
@@ -407,12 +409,18 @@ export function Studio() {
     );
   }
 
+  const playingName = sound ? labelFor(sound) : t("library.empty");
+
   return (
     <main className="app">
       <header className="toolbar">
         <strong>{t("app.name")}</strong>
-        {langs}
+        <span className={busy ? "live on" : "live"}>
+          <i />
+          {busy ? t("player.playing") : camera?.name || t("cameras.empty")}
+        </span>
         <span className="spacer" />
+        {langs}
         <span className="account">{account.email}</span>
         <button className="btn" type="button" onClick={signOut}>
           {t("account.signOut")}
@@ -429,15 +437,19 @@ export function Studio() {
                 className={item.id === selectedId ? "row-btn active" : "row-btn"}
                 onClick={() => setSelectedId(item.id)}
               >
-                <strong>{item.name}</strong>
-                <span>
-                  {item.model} · {item.host || t("cameras.waiting")}
+                <span className="cam-mark" aria-hidden="true" />
+                <span className="cam-copy">
+                  <strong>{item.name}</strong>
+                  <span>
+                    {item.model} · {item.host || t("cameras.waiting")}
+                  </span>
                 </span>
               </button>
             ))}
             {cameras.length === 0 && <p className="note">{t("cameras.empty")}</p>}
           </div>
           <div className="form">
+            <p className="section-label">{t("cameras.add")}</p>
             <label>
               {t("cameras.name")}
               <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
@@ -461,37 +473,53 @@ export function Studio() {
               />
             </label>
             <p className="note">{t("cameras.usesAccount")}</p>
-            <button className="btn-primary" type="button" onClick={addCamera}>
-              {t("cameras.add")}
-            </button>
-            {camera && (
-              <button className="btn" type="button" onClick={() => removeCamera(camera.id)}>
-                {t("cameras.remove")}
+            <div className="form-actions">
+              <button className="btn-primary" type="button" onClick={addCamera}>
+                {t("cameras.add")}
               </button>
-            )}
+              {camera && (
+                <button className="btn" type="button" onClick={() => removeCamera(camera.id)}>
+                  {t("cameras.remove")}
+                </button>
+              )}
+            </div>
           </div>
         </aside>
         <section className="main">
-          <div className="player">
-            <div>
-              <h1>{camera?.name || draft.model}</h1>
-              <p className="note">{camera ? `${camera.model} · ${camera.host || t("cameras.waiting")}` : t("cameras.empty")}</p>
+          <div className="deck">
+            <div className="now">
+              <p className="kicker">{camera ? camera.model : t("cameras")}</p>
+              <h1>{playingName}</h1>
+              <p className="note">
+                {camera
+                  ? `${camera.name} · ${camera.host || t("cameras.waiting")}`
+                  : t("cameras.empty")}
+              </p>
             </div>
-            <p className={ffmpegReady === false ? "status error" : "status"}>
-              {ffmpegReady === false ? t("player.noEngine") : t("player.sameNetwork")}
-            </p>
-            <div className="controls">
-              <button className="btn-primary" type="button" disabled={busy} onClick={() => void playOnCamera()}>
-                {busy ? t("player.playing") : t("player.play")}
+            <div className="transport">
+              <button
+                className={busy ? "round play busy" : "round play"}
+                type="button"
+                disabled={busy}
+                onClick={() => void playOnCamera()}
+                aria-label={t("player.play")}
+              >
+                <span />
+              </button>
+              <button
+                className="round stop"
+                type="button"
+                disabled={!busy}
+                onClick={() => void stop()}
+                aria-label={t("player.stop")}
+              >
+                <span />
               </button>
               <button className="btn" type="button" disabled={!sound} onClick={preview}>
                 {t("player.preview")}
               </button>
-              <button className="btn" type="button" disabled={!busy} onClick={() => void stop()}>
-                {t("player.stop")}
-              </button>
-              <label className="volume">
-                {t("player.level", { value: volume })}
+              <label className="fader">
+                <span>{t("player.level", { value: volume })}</span>
                 <input
                   type="range"
                   min={0}
@@ -502,11 +530,26 @@ export function Studio() {
                 />
               </label>
             </div>
-            <p className={tone ? `status ${tone}` : "status"}>{status}</p>
+            <p className={tone ? `status ${tone}` : ffmpegReady === false ? "status error" : "status"}>
+              {status || (ffmpegReady === false ? t("player.noEngine") : t("player.sameNetwork"))}
+            </p>
           </div>
-          <section className="library">
+          <section
+            className={hot ? "library hot" : "library"}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setHot(true);
+            }}
+            onDragLeave={() => setHot(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setHot(false);
+              void addFiles(event.dataTransfer.files);
+            }}
+          >
             <div className="library-head">
               <p className="section-label">{t("library")}</p>
+              <span className="drop-hint">{t("library.drop")}</span>
               <label className="btn">
                 {t("library.add")}
                 <input
@@ -521,23 +564,12 @@ export function Studio() {
                 />
               </label>
             </div>
-            <div
-              className={hot ? "drop hot" : "drop"}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setHot(true);
-              }}
-              onDragLeave={() => setHot(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setHot(false);
-                void addFiles(event.dataTransfer.files);
-              }}
-            >
-              {t("library.drop")}
-            </div>
             <div className="sound-list">
-              {sounds.length === 0 && <p className="note">{t("library.empty")}</p>}
+              <div className="sound-head">
+                <span>{t("library")}</span>
+                <span />
+              </div>
+              {sounds.length === 0 && <p className="note pad">{t("library.empty")}</p>}
               {sounds.map((item) => (
                 <div key={item.id} className={item.id === soundId ? "sound-row active" : "sound-row"}>
                   <button type="button" className="pick" onClick={() => setSoundId(item.id)}>
