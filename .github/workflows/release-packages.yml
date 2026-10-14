@@ -34,13 +34,13 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           set -o pipefail
-          npx electron-builder --win zip --x64 > /tmp/step.log 2>&1 || { echo "::error title=Package Windows::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
+          npx electron-builder --publish never --win zip --x64 > /tmp/step.log 2>&1 || { echo "::error title=Package Windows::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
       - name: Package macOS
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           set -o pipefail
-          npx electron-builder --mac zip --x64 --arm64 > /tmp/step.log 2>&1 || { echo "::error title=Package macOS::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
+          npx electron-builder --publish never --mac zip --x64 --arm64 > /tmp/step.log 2>&1 || { echo "::error title=Package macOS::$(tail -n 12 /tmp/step.log | tr '\n' ' ')"; exit 1; }
       - name: Attach packages to v0.1.0
         env:
           GH_TOKEN: ${{ github.token }}
