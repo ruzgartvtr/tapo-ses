@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { performPlay, performStop } from "../lib/server/playback";
+import { connectTapoAccount } from "../lib/tapo/cloud";
 import { ffmpegAvailable } from "../lib/tapo/transcode";
 
 if (!app.requestSingleInstanceLock()) {
@@ -23,7 +24,7 @@ function createWindow() {
     height: 880,
     minWidth: 860,
     minHeight: 640,
-    backgroundColor: "#10110e",
+    backgroundColor: "#f3f3f3",
     title: "Tapo Ses",
     autoHideMenuBar: true,
     webPreferences: {
@@ -53,6 +54,13 @@ function useBundledFfmpeg() {
 app.whenReady().then(() => {
   useBundledFfmpeg();
   ipcMain.handle("tapo:health", () => ({ ffmpeg: ffmpegAvailable() }));
+  ipcMain.handle("tapo:connect", (_event, payload: { email?: string; password?: string; code?: string }) =>
+    connectTapoAccount({
+      email: payload?.email ?? "",
+      password: payload?.password ?? "",
+      code: payload?.code,
+    }),
+  );
   ipcMain.handle("tapo:stop", (_event, host: string) => performStop(null, host ?? ""));
   ipcMain.handle("tapo:play", async (_event, payload: PlayPayload) => {
     const result = await performPlay(null, {

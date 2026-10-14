@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import { TAPO_MODELS, modelById } from "@/lib/models";
+import { TAPO_MODELS } from "@/lib/models";
+import { useI18n } from "@/src/i18n";
 
 type Camera = {
   id: string;
@@ -21,26 +22,36 @@ type Sound = {
 
 const CAMERA_KEY = "tapo-ses-cameras";
 const SETTINGS_KEY = "tapo-ses-settings";
+const ACCOUNT_KEY = "tapo-ses-account";
 const DB_NAME = "tapo-ses";
 const STORE = "sounds";
 
+type Account = {
+  email: string;
+  password: string;
+};
+
 export function Studio() {
+  const { locale, setLocale, t } = useI18n();
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [sounds, setSounds] = useState<Sound[]>([]);
   const [soundId, setSoundId] = useState<string>("");
   const [volume, setVolume] = useState(100);
   const [ffmpegReady, setFfmpegReady] = useState<boolean | null>(null);
-  const [status, setStatus] = useState("Hazır");
+  const [status, setStatus] = useState("");
   const [tone, setTone] = useState<"ok" | "error" | "">("");
   const [busy, setBusy] = useState(false);
   const [hot, setHot] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [accountReady, setAccountReady] = useState(false);
+  const [login, setLogin] = useState({ email: "", password: "", code: "" });
+  const [needsCode, setNeedsCode] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [draft, setDraft] = useState({
     name: "Salon",
     model: "C210",
     host: "",
-    password: "",
-    passwordIsHash: false,
   });
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const stopRequested = useRef(false);
@@ -56,6 +67,17 @@ export function Studio() {
     if (settings) {
       const parsed = JSON.parse(settings) as { volume?: number };
       setVolume(parsed.volume ?? 100);
+    }
+    const savedAccount = localStorage.getItem(ACCOUNT_KEY);
+    let saved: Account | null = null;
+    if (savedAccount) {
+      const parsed = JSON.parse(savedAccount) as Account;
+      if (parsed.email?.includes("@") && parsed.password) saved = parsed;
+    }
+    setAccountReady(true);
+    if (saved) {
+      setLogin({ email: saved.email, password: saved.password, code: "" });
+      void connectAccount(saved.email, saved.password);
     }
     void loadSounds().then((items) => {
       setSounds(items);
@@ -74,20 +96,95 @@ export function Studio() {
 
   const camera = cameras.find((item) => item.id === selectedId) ?? null;
   const sound = sounds.find((item) => item.id === soundId) ?? null;
-  const model = modelById(camera?.model || draft.model);
 
-  function addCamera() {
-    if (!draft.host.trim() || !draft.password) {
+  async function connectAccount(email: string, password: string, code?: string) {
+    if (!window.tapo?.connect) {
       setTone("error");
-      setStatus("Kamera adresi ve bulut şifresi gerekli.");
+      setStatus(t("auth.desktopOnly"));
       return;
     }
-    const next: Camera = { id: crypto.randomUUID(), ...draft, name: draft.name.trim() || draft.model };
+    setConnecting(true);
+    setTone("");
+    setStatus(t("auth.working"));
+    try {
+      const result = await window.tapo.connect({ email, password, code });
+      if (!result.ok) {
+        setNeedsCode(Boolean(result.mfa));
+        setTone("error");
+        setStatus(shown(result.error || t("auth.failed")));
+        return;
+      }
+      const next = { email, password };
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(next));
+      const found = (result.cameras ?? []).map((item) => ({
+        ...item,
+        password,
+        passwordIsHash: false,
+      }));
+      if (found.length > 0) {
+        setCameras(found);
+        setSelectedId(found[0]!.id);
+      }
+      setAccount(next);
+      setNeedsCode(false);
+      setLogin({ email, password: "", code: "" });
+      setTone(found.length > 0 ? "ok" : "error");
+      const missing = found.filter((item) => !item.host).length;
+      setStatus(
+        found.length === 0
+          ? t("auth.connectedNone")
+          : missing > 0
+            ? t("auth.connectedMissing", { count: found.length })
+            : t("auth.connected", { count: found.length }),
+      );
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : t("auth.failed");
+      setTone("error");
+      setStatus(shown(raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "")));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  function saveAccount() {
+    const email = login.email.trim();
+    if (!email.includes("@") || !login.password) {
+      setTone("error");
+      setStatus(t("auth.required"));
+      return;
+    }
+    void connectAccount(email, login.password, needsCode ? login.code : undefined);
+  }
+
+  function signOut() {
+    localStorage.removeItem(ACCOUNT_KEY);
+    setAccount(null);
+    setLogin({ email: "", password: "", code: "" });
+    setNeedsCode(false);
+    setTone("");
+    setStatus(t("account.ready"));
+  }
+
+  function addCamera() {
+    if (!account) return;
+    if (!draft.host.trim()) {
+      setTone("error");
+      setStatus(t("cameras.addressNeeded"));
+      return;
+    }
+    const next: Camera = {
+      id: crypto.randomUUID(),
+      name: draft.name.trim() || draft.model,
+      model: draft.model,
+      host: draft.host.trim(),
+      password: account.password,
+      passwordIsHash: false,
+    };
     setCameras((current) => [...current, next]);
     setSelectedId(next.id);
-    setDraft((current) => ({ ...current, host: "", password: "" }));
+    setDraft((current) => ({ ...current, host: "" }));
     setTone("ok");
-    setStatus(`${next.name} eklendi. Şifre yalnız bu bilgisayarda durur.`);
+    setStatus(t("cameras.added", { name: next.name }));
   }
 
   function removeCamera(id: string) {
@@ -99,7 +196,7 @@ export function Studio() {
     const list = [...files].filter((file) => file.size > 0 && file.size <= 8_000_000);
     if (list.length === 0) {
       setTone("error");
-      setStatus("Dosya boş ya da 8 MB üzerinde.");
+      setStatus(t("library.badFile"));
       return;
     }
     const created: Sound[] = [];
@@ -118,7 +215,7 @@ export function Studio() {
     setSounds((current) => [...created, ...current]);
     setSoundId(created[0]!.id);
     setTone("ok");
-    setStatus(`${created.length} ses kitaplığa alındı.`);
+    setStatus(t("library.added", { count: created.length }));
   }
 
   async function removeSound(id: string) {
@@ -136,53 +233,53 @@ export function Studio() {
     audio.onended = () => URL.revokeObjectURL(url);
     void audio.play();
     setTone("");
-    setStatus("Önizleme bu bilgisayarın hoparlöründe.");
+    setStatus(t("player.previewLocal"));
   }
 
   async function playOnCamera() {
-    if (!camera || !sound) {
+    if (!account || !camera || !sound) {
       setTone("error");
-      setStatus("Önce bir kamera ve bir ses seç.");
+      setStatus(t("player.needSelection"));
       return;
     }
     if (!window.tapo) {
       setTone("error");
-      setStatus("Ses motoru yalnız masaüstü uygulamasında çalışır.");
+      setStatus(t("player.desktopOnly"));
       return;
     }
     stopRequested.current = false;
     setBusy(true);
     setTone("");
-    setStatus(`${camera.model} hoparlörüne gönderiliyor…`);
+    setStatus(t("player.sending", { model: camera.model }));
     try {
       const body = await window.tapo.play({
         host: camera.host,
-        password: camera.password,
-        passwordIsHash: camera.passwordIsHash,
+        password: account.password,
+        passwordIsHash: false,
         volume,
         file: new Uint8Array(sound.bytes),
       });
       if (stopRequested.current) {
         setTone("");
-        setStatus("Çalma durduruldu.");
+        setStatus(t("player.stopped"));
         return;
       }
       setTone("ok");
       const seconds = Math.round((body.durationMs ?? sound.durationMs) / 100) / 10;
       setStatus(
         body.truncated
-          ? `${camera.name} ilk 90 saniyeyi çaldı.`
-          : `${camera.name} sesi çaldı (${seconds} sn, PCMA 8 kHz).`,
+          ? t("player.truncated", { name: camera.name })
+          : t("player.played", { name: camera.name, seconds }),
       );
     } catch (error) {
-      const raw = error instanceof Error ? error.message : "Ses çalınamadı";
-      const message = raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
-      if (stopRequested.current || message.includes("durduruldu")) {
+      const raw = error instanceof Error ? error.message : t("auth.failed");
+      const cleaned = raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+      if (stopRequested.current || cleaned.includes("Stopped")) {
         setTone("");
-        setStatus("Çalma durduruldu.");
+        setStatus(t("player.stopped"));
       } else {
         setTone("error");
-        setStatus(message);
+        setStatus(shown(cleaned));
       }
     } finally {
       setBusy(false);
@@ -194,224 +291,274 @@ export function Studio() {
     setBusy(false);
     if (!camera) return;
     await window.tapo?.stop(camera.host).catch(() => undefined);
-    setStatus("Çalma durduruldu.");
+    setStatus(t("player.stopped"));
+  }
+
+  function labelFor(item: Sound) {
+    if (item.id === "preset-Zil") return t("sound.bell");
+    if (item.id === "preset-Uyarı") return t("sound.alert");
+    if (item.id === "preset-Hoş geldin") return t("sound.welcome");
+    return item.name;
+  }
+
+  function shown(message: string) {
+    if (locale === "en") return message;
+    const exact: Record<string, string> = {
+      "Email or password was rejected.": "E-posta veya şifre kabul edilmedi.",
+      "Tapo account was not found.": "Tapo hesabı bulunamadı.",
+      "Could not read the Tapo server.": "Tapo sunucusu okunamadı.",
+      "Audio engine missing. Reinstall the app.": "Ses motoru yok. Uygulamayı yeniden kur.",
+      "Camera address is invalid.": "Kamera adresi geçersiz.",
+      "This address cannot be used.": "Bu adres kullanılamaz.",
+      "Camera port is invalid.": "Kamera portu geçersiz.",
+      "The camera closed the connection.": "Kamera bağlantıyı kapattı.",
+      "The camera did not start a talk session.": "Kameradan konuşma oturumu gelmedi.",
+      "Cloud password required.": "Bulut şifresi gerekli.",
+      "The audio file is empty.": "Ses dosyası boş.",
+      "The camera does not use digest authentication.": "Kamera Digest kimlik doğrulaması istemiyor.",
+      "Password rejected. Use the Tapo account password, not the RTSP password.":
+        "Şifre kabul edilmedi. RTSP şifresi değil, Tapo hesap şifresi gerekli.",
+      "Stopped.": "Durduruldu.",
+      "The camera timed out.": "Kamera zaman aşımına uğradı.",
+      "Connecting to the camera timed out.": "Kameraya bağlanırken zaman aşımı.",
+    };
+    if (exact[message]) return exact[message];
+    const patterns: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+      [/^Tapo rejected the connection \((.+)\).$/, (match) => `Tapo bağlantıyı reddetti (${match[1]}).`],
+      [/^The camera rejected the talk request \((.+)\).$/, (match) => `Kamera konuşma isteğini reddetti (${match[1]}).`],
+      [/^The camera did not ask for a password \((.+)\).$/, (match) => `Kamera kimlik doğrulaması vermedi (${match[1]}).`],
+      [/^The camera did not open the stream \((.+)\).$/, (match) => `Kamera akışı açılmadı (${match[1]}).`],
+      [/^Could not reach the camera \((.+)\). It must be on this network with port 8800 open.$/, (match) => `Kameraya ulaşılamadı (${match[1]}). Aynı ağda olmalı ve 8800 portu açık olmalı.`],
+    ];
+    for (const [pattern, format] of patterns) {
+      const match = message.match(pattern);
+      if (match) return format(match);
+    }
+    return message;
+  }
+
+  if (!accountReady) return null;
+
+  const langs = (
+    <div className="langs" role="group" aria-label="Language">
+      <button type="button" className={locale === "en" ? "active" : ""} onClick={() => setLocale("en")}>
+        {t("lang.en")}
+      </button>
+      <button type="button" className={locale === "tr" ? "active" : ""} onClick={() => setLocale("tr")}>
+        {t("lang.tr")}
+      </button>
+    </div>
+  );
+
+  if (!account) {
+    return (
+      <main className="gate">
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveAccount();
+          }}
+        >
+          <div className="card-top">
+            <strong>{t("app.name")}</strong>
+            {langs}
+          </div>
+          <h1>{t("auth.title")}</h1>
+          <p className="lead">{t("auth.lead")}</p>
+          <label>
+            {t("auth.email")}
+            <input
+              type="email"
+              autoComplete="username"
+              inputMode="email"
+              value={login.email}
+              onChange={(event) => setLogin({ ...login, email: event.target.value })}
+            />
+          </label>
+          <label>
+            {t("auth.password")}
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={login.password}
+              onChange={(event) => setLogin({ ...login, password: event.target.value })}
+            />
+          </label>
+          {needsCode && (
+            <label>
+              {t("auth.code")}
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={login.code}
+                onChange={(event) => setLogin({ ...login, code: event.target.value })}
+              />
+            </label>
+          )}
+          <button className="btn-primary" type="submit" disabled={connecting}>
+            {connecting ? t("auth.working") : needsCode ? t("auth.verify") : t("auth.submit")}
+          </button>
+          {(connecting || tone === "error") && (
+            <p className={tone === "error" ? "status error" : "status"}>{status}</p>
+          )}
+        </form>
+      </main>
+    );
   }
 
   return (
-    <main className="studio">
-      <header className="topbar">
-        <div>
-          <div className="mark">
-            <div className="mark-badge" aria-hidden>
-              <svg width="22" height="22" viewBox="0 0 22 22">
-                <circle cx="11" cy="11" r="8" stroke="#E7FF6A" fill="none" />
-                <circle cx="11" cy="11" r="2.5" fill="#E7FF6A" />
-              </svg>
-            </div>
-            <p className="eyebrow">Tapo Ses · C210</p>
-          </div>
-          <h1>Kameradan kendi sesin çıksın.</h1>
-        </div>
-        <p className="lede">
-          Windows ve macOS uygulaması. MP3 dosyan C210 hoparlörünün anladığı biçime çevrilir ve kamerayla aynı ağdan çalar.
-        </p>
+    <main className="app">
+      <header className="toolbar">
+        <strong>{t("app.name")}</strong>
+        {langs}
+        <span className="spacer" />
+        <span className="account">{account.email}</span>
+        <button className="btn" type="button" onClick={signOut}>
+          {t("account.signOut")}
+        </button>
       </header>
-
-      <p className={ffmpegReady === false ? "status error" : "status"} role="status">
-        {ffmpegReady === false
-          ? "Ses motoru bulunamadı. Uygulamayı yeniden kur."
-          : "Bilgisayar kamerayla aynı ev ağında olmalı."}
-      </p>
-
-      <section className="stage">
-        <aside className="camera-col">
-          <div className="row">
-            <p className="label">Kameralar</p>
-            <span className="meta">{cameras.length}</span>
-          </div>
+      <div className="workspace">
+        <aside className="sidebar">
+          <p className="section-label">{t("cameras")}</p>
           <div className="camera-list">
             {cameras.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={item.id === selectedId ? "camera-card active" : "camera-card"}
+                className={item.id === selectedId ? "row-btn active" : "row-btn"}
                 onClick={() => setSelectedId(item.id)}
               >
-                <span className="chip">{item.model}</span>
                 <strong>{item.name}</strong>
-                <span className="meta">{item.host}</span>
+                <span>
+                  {item.model} · {item.host || t("cameras.waiting")}
+                </span>
               </button>
             ))}
-            {cameras.length === 0 && <p className="note">Henüz kamera yok. C210 ile başla.</p>}
+            {cameras.length === 0 && <p className="note">{t("cameras.empty")}</p>}
           </div>
-          <div className="camera-form">
-            <label className="field">
-              <span>Ad</span>
+          <div className="form">
+            <label>
+              {t("cameras.name")}
               <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
             </label>
-            <label className="field">
-              <span>Model</span>
+            <label>
+              {t("cameras.model")}
               <select value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })}>
                 {TAPO_MODELS.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.label}
-                    {item.featured ? " · öncelikli" : ""}
                   </option>
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Adres</span>
+            <label>
+              {t("cameras.address")}
               <input
                 value={draft.host}
                 placeholder="192.168.1.40"
                 onChange={(event) => setDraft({ ...draft, host: event.target.value })}
               />
             </label>
-            <label className="field">
-              <span>Bulut şifresi</span>
-              <input
-                type="password"
-                value={draft.password}
-                autoComplete="new-password"
-                onChange={(event) => setDraft({ ...draft, password: event.target.value })}
-              />
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.passwordIsHash}
-                onChange={(event) => setDraft({ ...draft, passwordIsHash: event.target.checked })}
-              />
-              Şifre zaten MD5 veya SHA256 özeti
-            </label>
-            <div className="actions">
-              <button className="primary" type="button" onClick={addCamera}>
-                Kamerayı ekle
+            <p className="note">{t("cameras.usesAccount")}</p>
+            <button className="btn-primary" type="button" onClick={addCamera}>
+              {t("cameras.add")}
+            </button>
+            {camera && (
+              <button className="btn" type="button" onClick={() => removeCamera(camera.id)}>
+                {t("cameras.remove")}
               </button>
-              {camera && (
-                <button className="ghost" type="button" onClick={() => removeCamera(camera.id)}>
-                  Sil
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </aside>
-
-        <div className="well">
-          <div className="well-head">
+        <section className="main">
+          <div className="player">
             <div>
-              <span className="chip">{model.id === "C210" ? "Öncelikli model" : model.label}</span>
-              <h2>{camera?.name || "C210"}</h2>
-              <p className="note">{model.blurb}</p>
+              <h1>{camera?.name || draft.model}</h1>
+              <p className="note">{camera ? `${camera.model} · ${camera.host || t("cameras.waiting")}` : t("cameras.empty")}</p>
             </div>
-            <p className="meta">{camera?.host || "Adres bekleniyor"}</p>
-          </div>
-
-          <div className={busy ? "device live" : "device"} aria-hidden>
-            <CameraGlyph />
-          </div>
-
-          <div>
-            <div className="actions">
-              <button className="primary" type="button" disabled={busy} onClick={() => void playOnCamera()}>
-                {busy ? "Çalıyor…" : "Kamerada çal"}
+            <p className={ffmpegReady === false ? "status error" : "status"}>
+              {ffmpegReady === false ? t("player.noEngine") : t("player.sameNetwork")}
+            </p>
+            <div className="controls">
+              <button className="btn-primary" type="button" disabled={busy} onClick={() => void playOnCamera()}>
+                {busy ? t("player.playing") : t("player.play")}
               </button>
-              <button className="copper" type="button" disabled={!sound} onClick={preview}>
-                Önizle
+              <button className="btn" type="button" disabled={!sound} onClick={preview}>
+                {t("player.preview")}
               </button>
-              <button className="ghost" type="button" disabled={!busy} onClick={() => void stop()}>
-                Durdur
+              <button className="btn" type="button" disabled={!busy} onClick={() => void stop()}>
+                {t("player.stop")}
               </button>
-              <label className="field volume">
-                <span>Seviye {volume}</span>
+              <label className="volume">
+                {t("player.level", { value: volume })}
                 <input
                   type="range"
                   min={0}
                   max={150}
                   value={volume}
                   onChange={(event) => setVolume(Number(event.target.value))}
-                  aria-label="Ses seviyesi"
+                  aria-label={t("player.volume")}
                 />
               </label>
             </div>
             <p className={tone ? `status ${tone}` : "status"}>{status}</p>
           </div>
-        </div>
-      </section>
-
-      <section className="library">
-        <div className="library-head">
-          <div>
-            <p className="eyebrow">Kitaplık</p>
-            <h2 className="display" style={{ margin: 0, fontSize: 32 }}>
-              Özel sesler
-            </h2>
-          </div>
-          <label className="copper" style={{ display: "inline-block" }}>
-            MP3 yükle
-            <input
-              hidden
-              type="file"
-              accept="audio/*,.mp3,.wav,.m4a,.ogg"
-              multiple
-              onChange={(event) => {
-                if (event.target.files) void addFiles(event.target.files);
-                event.target.value = "";
+          <section className="library">
+            <div className="library-head">
+              <p className="section-label">{t("library")}</p>
+              <label className="btn">
+                {t("library.add")}
+                <input
+                  hidden
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.m4a,.ogg"
+                  multiple
+                  onChange={(event) => {
+                    if (event.target.files) void addFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            <div
+              className={hot ? "drop hot" : "drop"}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setHot(true);
               }}
-            />
-          </label>
-        </div>
-        <div
-          className={hot ? "drop hot" : "drop"}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setHot(true);
-          }}
-          onDragLeave={() => setHot(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setHot(false);
-            void addFiles(event.dataTransfer.files);
-          }}
-        >
-          MP3, WAV, M4A veya OGG bırak. C210 bunu 8 kHz A-law olarak duyar; kısa anonslar en temiz sonucu verir.
-        </div>
-        <div className="sounds">
-          {sounds.map((item) => (
-            <article key={item.id} className={item.id === soundId ? "sound-card selected" : "sound-card"}>
-              <button type="button" className="pick" onClick={() => setSoundId(item.id)}>
-                <strong>{item.name}</strong>
-                <span className="meta">{formatDuration(item.durationMs)}</span>
-              </button>
-              <button className="text-btn" type="button" onClick={() => void removeSound(item.id)}>
-                Kaldır
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
+              onDragLeave={() => setHot(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setHot(false);
+                void addFiles(event.dataTransfer.files);
+              }}
+            >
+              {t("library.drop")}
+            </div>
+            <div className="sound-list">
+              {sounds.length === 0 && <p className="note">{t("library.empty")}</p>}
+              {sounds.map((item) => (
+                <div key={item.id} className={item.id === soundId ? "sound-row active" : "sound-row"}>
+                  <button type="button" className="pick" onClick={() => setSoundId(item.id)}>
+                    <strong>{labelFor(item)}</strong>
+                    <span>{formatDuration(item.durationMs, t("library.unknownDuration"))}</span>
+                  </button>
+                  <button className="quiet" type="button" onClick={() => void removeSound(item.id)}>
+                    {t("library.remove")}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </section>
+      </div>
     </main>
   );
 }
 
-function CameraGlyph() {
-  return (
-    <svg viewBox="0 0 320 320" role="img" aria-label="Tapo C210">
-      <rect x="78" y="46" width="164" height="228" rx="82" fill="#ece7df" />
-      <rect x="96" y="64" width="128" height="150" rx="64" fill="#1b1d18" />
-      <circle className="ring" cx="160" cy="132" r="46" fill="none" stroke="#E7FF6A" strokeWidth="3" strokeDasharray="8 10" />
-      <circle cx="160" cy="132" r="28" fill="#2a2e26" />
-      <circle className="pupil" cx="160" cy="132" r="12" fill="#E7FF6A" />
-      <circle cx="168" cy="124" r="4" fill="#fff8" />
-      <rect x="132" y="214" width="56" height="8" rx="4" fill="#c8c2b6" />
-      <rect x="118" y="236" width="84" height="18" rx="9" fill="#d7d1c6" />
-    </svg>
-  );
-}
-
-function formatDuration(durationMs: number) {
-  if (!durationMs) return "Süre bilinmiyor";
+function formatDuration(durationMs: number, unknown: string) {
+  if (!durationMs) return unknown;
   const total = Math.round(durationMs / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }

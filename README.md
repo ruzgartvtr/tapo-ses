@@ -1,29 +1,44 @@
-# Tapo Ses 0.1.0
+# Tapo Ses
 
-Windows ve macOS uygulaması. Tapo C210 ve aynı konuşma kanalını kullanan Tapo kameraların hoparlöründen ses dosyası çalar.
+Play your own audio through a Tapo camera speaker. C210 is the primary model. The app also works with other Tapo cameras that use the same talk channel.
 
-Paketler: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.1.0
+The interface language follows the system. English is the default. Turkish is used when the system language is Turkish.
 
-- Windows x64: `Tapo Ses-0.1.0-win.zip` içindeki `Tapo Ses.exe`
-- macOS Apple silicon: `Tapo Ses-0.1.0-arm64-mac.zip`
-- macOS Intel: `Tapo Ses-0.1.0-mac.zip`
+## Install
 
-Zip’i açıp uygulamayı çalıştır. macOS “hasar görmüş” derse `Ac.command` dosyasına sağ tıkla ve Aç.
+Desktop packages: https://github.com/ruzgartvtr/tapo-ses/releases/tag/v0.1.0
 
-## Bu sürüm
+- Windows x64: `Tapo.Ses-0.1.0-win.zip`
+- macOS Apple silicon: `Tapo.Ses-0.1.0-arm64-mac.zip`
+- macOS Intel: `Tapo.Ses-0.1.0-mac.zip`
 
-- MP3, WAV, M4A ve OGG dosyaları 8 kHz mono PCMA’ya çevrilir.
-- Ses, kameranın konuşma kanalına gider (TCP 8800).
-- Bilgisayar ile kamera aynı ağda olmalıdır.
-- Giriş Tapo bulut şifresiyle yapılır. RTSP şifresi geçersizdir. Şifre yalnız o bilgisayarda durur.
-- Kamera listesi, ses kitaplığı ve seviye (0–150) yerelde tutulur.
-- Hazır sesler: Zil, Uyarı, Hoş geldin.
-- Bir çalma en fazla 90 saniyedir.
-- Modeller: C210 (birincil), C200, C220, C225, C100, C110, C310, C320WS, C500, C510W, D230.
+On macOS, if Gatekeeper reports the app as damaged, right-click `Ac.command` and choose Open.
 
-C210 hoparlörü telefon kalitesindedir. Kısa anonslar daha net duyulur.
+Linux packages are built from this repository:
 
-## Kaynak
+```bash
+npm install
+npm run dist:linux
+```
+
+That produces an AppImage and a `.deb` for x64 and arm64.
+
+Android: open the `android` directory in Android Studio and run the `app` module. It is a native Kotlin app. English is the default; Turkish follows the phone language.
+
+## What it does
+
+- MP3, WAV, M4A, and OGG are converted to 8 kHz mono PCMA.
+- Audio is sent on the camera talk channel, TCP port 8800.
+- The computer or phone and the camera must be on the same network.
+- Sign in with the Tapo account password. The RTSP password is not accepted. The password stays on the device.
+- Camera list, sound library, and level (0–150) stay on the device.
+- Built-in sounds: Bell, Alert, Welcome.
+- One playback is limited to 90 seconds.
+- Models: C210 (primary), C200, C220, C225, C100, C110, C310, C320WS, C500, C510W, D230.
+
+The C210 speaker is telephone quality. Short announcements are clearer.
+
+## Source
 
 ```bash
 npm install
