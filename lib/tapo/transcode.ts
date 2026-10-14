@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
-const MAX_SECONDS = 90;
+const MAX_SECONDS = 3600;
 const SAMPLE_RATE = 8000;
 
 export function ffmpegBinary(): string {

@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
 
 private const val FRAME = 160
 private const val RATE = 8000
-private const val MAX_SECONDS = 90
+private const val MAX_SECONDS = 3600
 
 fun playFileOnCamera(
     context: Context,
@@ -46,13 +46,17 @@ fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteA
         if (track < 0 || format == null) error(if (english) "That file has no audio." else "Dosyada ses yok.")
         extractor.selectTrack(track)
         val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-        val decoded = if (mime == "audio/raw" || mime == "audio/wav" || mime == "audio/x-wav") {
-            Decoded(readPcm(extractor), decoderOutput(format).sampleRate, decoderOutput(format).channels)
+        val info = decoderOutput(format)
+        val writer = if (mime == "audio/raw" || mime == "audio/wav" || mime == "audio/x-wav") {
+            val sink = AlawWriter(info.sampleRate, info.channels, volume)
+            readPcm(extractor, sink)
+            sink
         } else {
-            decodeCompressed(extractor, format, mime, english)
+            decodeCompressed(extractor, format, mime, volume, english)
         }
-        if (decoded.pcm.isEmpty()) error(if (english) "That file has no audio." else "Dosyada ses yok.")
-        return resampleToAlaw(decoded, volume)
+        val audio = writer.bytes()
+        if (audio.isEmpty()) error(if (english) "That file has no audio." else "Dosyada ses yok.")
+        return audio
     } catch (error: IllegalStateException) {
         throw error
     } catch (error: Exception) {
@@ -62,38 +66,65 @@ fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteA
     }
 }
 
-private data class Decoded(val pcm: List<Short>, val sampleRate: Int, val channels: Int)
+private class AlawWriter(sampleRate: Int, channels: Int, volume: Int) {
+    private val channelCount = channels.coerceAtLeast(1)
+    private val step = sampleRate.coerceAtLeast(8000).toDouble() / RATE
+    private val gain = volume.coerceIn(0, 150) / 100f
+    private val out = ByteArray(MAX_SECONDS * RATE)
+    private var length = 0
+    private var channelSum = 0
+    private var channelLeft = channelCount
+    private var cursor = 0.0
 
-private fun readPcm(extractor: MediaExtractor): List<Short> {
-    val pcm = ArrayList<Short>()
+    val full: Boolean get() = length >= out.size
+
+    fun push(sample: Short) {
+        if (full) return
+        channelSum += sample.toInt()
+        channelLeft -= 1
+        if (channelLeft > 0) return
+        channelLeft = channelCount
+        val mono = channelSum / channelCount
+        channelSum = 0
+        cursor += 1.0
+        if (cursor < step) return
+        cursor -= step
+        val scaled = (mono * gain).roundToInt().coerceIn(-32768, 32767)
+        out[length] = linearToAlaw(scaled).toByte()
+        length += 1
+    }
+
+    fun bytes(): ByteArray = if (length == out.size) out else out.copyOf(length)
+}
+
+private fun readPcm(extractor: MediaExtractor, writer: AlawWriter) {
     val buffer = java.nio.ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN)
-    while (pcm.size < RATE * MAX_SECONDS) {
+    while (!writer.full) {
         buffer.clear()
         val size = extractor.readSampleData(buffer, 0)
         if (size < 0) break
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         buffer.position(0)
         buffer.limit(size)
-        while (buffer.remaining() >= 2 && pcm.size < RATE * MAX_SECONDS) pcm.add(buffer.short)
+        while (buffer.remaining() >= 2 && !writer.full) writer.push(buffer.short)
         extractor.advance()
     }
-    return pcm
 }
 
-private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mime: String, english: Boolean): Decoded {
+private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mime: String, volume: Int, english: Boolean): AlawWriter {
     if (!format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
     val decoder = MediaCodec.createDecoderByType(mime)
     var sampleRate = decoderOutput(format).sampleRate
     var channels = decoderOutput(format).channels
-    val pcm = ArrayList<Short>()
+    var writer = AlawWriter(sampleRate, channels, volume)
     try {
         decoder.configure(format, null, null, 0)
         decoder.start()
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
-        val deadline = System.currentTimeMillis() + 20_000
-        while (!outputDone && pcm.size < RATE * MAX_SECONDS && System.currentTimeMillis() < deadline) {
+        val deadline = System.currentTimeMillis() + 600_000
+        while (!outputDone && !writer.full && System.currentTimeMillis() < deadline) {
             if (!inputDone) {
                 val index = decoder.dequeueInputBuffer(10_000)
                 if (index >= 0) {
@@ -114,6 +145,7 @@ private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mim
                     val out = decoder.outputFormat
                     if (out.containsKey(MediaFormat.KEY_SAMPLE_RATE)) sampleRate = out.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(8000)
                     if (out.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                    if (writer.bytes().isEmpty()) writer = AlawWriter(sampleRate, channels, volume)
                 }
                 else -> if (index >= 0) {
                     if (info.size > 0) {
@@ -121,7 +153,7 @@ private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mim
                         buffer.order(ByteOrder.LITTLE_ENDIAN)
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
-                        while (buffer.remaining() >= 2 && pcm.size < RATE * MAX_SECONDS) pcm.add(buffer.short)
+                        while (buffer.remaining() >= 2 && !writer.full) writer.push(buffer.short)
                     }
                     outputDone = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     decoder.releaseOutputBuffer(index, false)
@@ -134,33 +166,7 @@ private fun decodeCompressed(extractor: MediaExtractor, format: MediaFormat, mim
         runCatching { decoder.stop() }
         runCatching { decoder.release() }
     }
-    return Decoded(pcm, sampleRate, channels)
-}
-
-private fun resampleToAlaw(decoded: Decoded, volume: Int): ByteArray {
-    val channels = decoded.channels.coerceAtLeast(1)
-    val pcm = decoded.pcm
-    val gain = volume.coerceIn(0, 150) / 100f
-    val mono = ShortArray(pcm.size / channels)
-    var i = 0
-    var o = 0
-    while (i + channels <= pcm.size && o < mono.size) {
-        var sum = 0
-        for (c in 0 until channels) sum += pcm[i + c]
-        mono[o] = (sum / channels).toShort()
-        i += channels
-        o += 1
-    }
-    val count = min(o, RATE * MAX_SECONDS).coerceAtLeast(1)
-    val ratio = decoded.sampleRate.toDouble() / RATE
-    val length = min(MAX_SECONDS * RATE, (count / ratio).toInt().coerceAtLeast(1))
-    val alaw = ByteArray(length)
-    for (n in 0 until length) {
-        val source = min(count - 1, (n * ratio).roundToInt())
-        val sample = (mono[source] * gain).roundToInt().coerceIn(-32768, 32767)
-        alaw[n] = linearToAlaw(sample).toByte()
-    }
-    return alaw
+    return writer
 }
 
 private data class PcmFormat(val sampleRate: Int, val channels: Int)

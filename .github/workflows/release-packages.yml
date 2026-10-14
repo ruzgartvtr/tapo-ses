@@ -1,5 +1,5 @@
 name: Release packages
-# A change to this file rebuilds Windows, Linux, and macOS packages for 0.2.0.
+# A change to this file rebuilds Windows, Linux, and macOS packages onto the 0.2.0 release.
 on:
   push:
     paths:

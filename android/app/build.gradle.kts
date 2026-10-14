@@ -20,7 +20,7 @@ android {
         applicationId = "com.ruzgar.taposes"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
+        versionCode = 6
         versionName = "0.2.0"
     }
 
