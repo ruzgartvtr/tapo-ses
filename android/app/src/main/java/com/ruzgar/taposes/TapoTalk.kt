@@ -15,6 +15,7 @@ import kotlin.math.roundToInt
 private const val FRAME = 160
 private const val RATE = 8000
 private const val MAX_SECONDS = 90
+private const val CHUNK = 7 * RATE
 
 fun playFileOnCamera(
     context: Context,
@@ -24,9 +25,10 @@ fun playFileOnCamera(
     volume: Int,
     english: Boolean,
     cancelled: () -> Boolean,
+    onPart: (Int, Int) -> Unit = { _, _ -> },
 ): Int {
     val alaw = fileToAlaw(context, uri, volume, english)
-    return playAlaw(host, password, alaw, english, cancelled)
+    return playAlaw(host, password, alaw, english, cancelled, onPart)
 }
 
 fun fileToAlaw(context: Context, uri: Uri, volume: Int, english: Boolean): ByteArray {
@@ -188,9 +190,33 @@ private fun linearToAlaw(sample: Int): Int {
     return ((seg shl 4) or mantissa) xor mask
 }
 
-fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, cancelled: () -> Boolean): Int {
+fun playAlaw(
+    host: String,
+    password: String,
+    alaw: ByteArray,
+    english: Boolean,
+    cancelled: () -> Boolean,
+    onPart: (Int, Int) -> Unit = { _, _ -> },
+): Int {
     if (password.isEmpty()) error(if (english) "Cloud password required." else "Bulut şifresi gerekli.")
     if (alaw.isEmpty()) error(if (english) "The audio file is empty." else "Ses dosyası boş.")
+    val partCount = (alaw.size + CHUNK - 1) / CHUNK
+    var offset = 0
+    var played = 0
+    var part = 1
+    while (offset < alaw.size) {
+        if (cancelled()) error(if (english) "Stopped." else "Durduruldu.")
+        val end = min(offset + CHUNK, alaw.size)
+        onPart(part, partCount)
+        played += playSession(host, password, alaw.copyOfRange(offset, end), english, cancelled)
+        offset = end
+        part += 1
+        if (offset < alaw.size) Thread.sleep(400)
+    }
+    return played
+}
+
+private fun playSession(host: String, password: String, alaw: ByteArray, english: Boolean, cancelled: () -> Boolean): Int {
     val parts = host.trim().split(":")
     val hostname = parts[0]
     val port = parts.getOrNull(1)?.toIntOrNull() ?: 8800
@@ -213,6 +239,16 @@ fun playAlaw(host: String, password: String, alaw: ByteArray, english: Boolean, 
         writeAll(socket, jsonPart("""{"params":{"talk":{"mode":"aec"},"method":"get"},"seq":3,"type":"request"}"""))
         val session = readSession(socket, english)
         socket.soTimeout = 0
+        val drain = Thread {
+            val input = socket.getInputStream()
+            val buf = ByteArray(1024)
+            try {
+                while (input.read(buf) >= 0) Unit
+            } catch (_: Exception) {
+            }
+        }
+        drain.isDaemon = true
+        drain.start()
         val muxer = PcmaMuxer()
         val pid = muxer.addTrack()
         sendTs(socket, session, muxer.header())
